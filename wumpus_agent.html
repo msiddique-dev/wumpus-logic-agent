@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Wumpus Logic Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --panel: #0f1218;
+    --border: #1e2a3a;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --safe: #00ff88;
+    --danger: #ff3355;
+    --unknown: #1e2a3a;
+    --visited: #0d2030;
+    --agent: #ffe066;
+    --text: #c8d8e8;
+    --dim: #4a6080;
+    --wumpus-color: #ff3355;
+    --pit-color: #8833ff;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  /* Scanline overlay */
+  body::before {
+    content:'';
+    position:fixed; inset:0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.015) 2px, rgba(0,212,255,0.015) 4px);
+    pointer-events:none; z-index:9999;
+  }
+
+  header {
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, #0a0c10 0%, #0d1520 50%, #0a0c10 100%);
+    display: flex; align-items: center; gap: 16px;
+  }
+  header .logo {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.3rem; font-weight: 900;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,212,255,0.5);
+    letter-spacing: 2px;
+  }
+  header .sub { color: var(--dim); font-size: 0.72rem; letter-spacing: 1px; margin-left:auto; }
+
+  .main-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr 280px;
+    gap: 0;
+    height: calc(100vh - 62px);
+  }
+
+  /* ---- SIDE PANELS ---- */
+  .side-panel {
+    border-right: 1px solid var(--border);
+    padding: 20px 16px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .side-panel.right { border-right: none; border-left: 1px solid var(--border); }
+
+  .panel-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.65rem; letter-spacing: 3px;
+    color: var(--accent); text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px; margin-bottom: 4px;
+  }
+
+  /* Config Section */
+  .config-group { display: flex; flex-direction: column; gap: 8px; }
+  .config-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .config-row label { font-size: 0.72rem; color: var(--dim); }
+  .config-row input[type=number] {
+    background: var(--panel); border: 1px solid var(--border);
+    color: var(--accent); font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem; width: 64px; padding: 4px 8px;
+    text-align: center; outline: none;
+  }
+  .config-row input[type=number]:focus { border-color: var(--accent); }
+
+  .btn {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.65rem; letter-spacing: 2px;
+    padding: 9px 14px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent);
+    cursor: pointer; text-transform: uppercase;
+    transition: all 0.2s; width: 100%;
+  }
+  .btn:hover { background: var(--accent); color: var(--bg); box-shadow: 0 0 20px rgba(0,212,255,0.4); }
+  .btn.danger { border-color: var(--accent2); color: var(--accent2); }
+  .btn.danger:hover { background: var(--accent2); color: var(--bg); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn:disabled:hover { background: transparent; color: var(--accent); box-shadow: none; }
+
+  /* Metrics */
+  .metric-card {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 12px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .metric-label { font-size: 0.62rem; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+  .metric-value {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.4rem; font-weight: 700; color: var(--accent);
+    text-shadow: 0 0 10px rgba(0,212,255,0.4);
+  }
+  .metric-value.orange { color: var(--accent2); text-shadow: 0 0 10px rgba(255,107,53,0.4); }
+  .metric-value.green { color: var(--safe); text-shadow: 0 0 10px rgba(0,255,136,0.4); }
+
+  /* Percepts */
+  .percept-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; background: var(--panel); border: 1px solid var(--border);
+    font-size: 0.72rem;
+  }
+  .percept-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .percept-dot.active { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+  .percept-dot.stench { background: #aa55ff; box-shadow: 0 0 8px #aa55ff; }
+
+  /* KB log */
+  .kb-log {
+    flex: 1; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 10px; font-size: 0.66rem; color: var(--dim);
+    line-height: 1.7; max-height: 300px;
+  }
+  .kb-log .entry { border-bottom: 1px solid rgba(30,42,58,0.5); padding: 3px 0; }
+  .kb-log .entry.tell { color: #00d4ff; }
+  .kb-log .entry.ask { color: #ffe066; }
+  .kb-log .entry.safe { color: var(--safe); }
+  .kb-log .entry.unsafe { color: var(--danger); }
+
+  /* ---- CENTER: GRID ---- */
+  .center-area {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 24px; gap: 20px;
+    background: radial-gradient(ellipse at center, #0d1520 0%, #0a0c10 70%);
+  }
+
+  #grid-container {
+    display: grid;
+    gap: 3px;
+  }
+  .cell {
+    width: 72px; height: 72px;
+    border: 1px solid var(--border);
+    background: var(--unknown);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative; cursor: default;
+    transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+    font-size: 0.6rem; color: var(--dim); text-align: center;
+    user-select: none;
+  }
+  .cell.visited { background: var(--visited); border-color: #1a3050; }
+  .cell.safe { background: rgba(0,255,136,0.08); border-color: rgba(0,255,136,0.4); }
+  .cell.danger-confirmed { background: rgba(255,51,85,0.15); border-color: rgba(255,51,85,0.5); }
+  .cell.agent-here {
+    background: rgba(255,224,102,0.12);
+    border-color: var(--agent);
+    box-shadow: 0 0 18px rgba(255,224,102,0.3), inset 0 0 12px rgba(255,224,102,0.08);
+  }
+  .cell.glitter { background: rgba(255,224,102,0.25); border-color: #ffe066; }
+  .cell .cell-icon { font-size: 1.5rem; line-height: 1; }
+  .cell .cell-label { font-size: 0.52rem; color: var(--dim); margin-top: 2px; letter-spacing: 0.5px; }
+  .cell .percept-indicators {
+    position: absolute; top: 3px; right: 4px;
+    display: flex; gap: 2px;
+  }
+  .cell .percept-indicators span { font-size: 0.6rem; }
+  .cell .coord {
+    position: absolute; bottom: 2px; left: 4px;
+    font-size: 0.48rem; color: rgba(74,96,128,0.6);
+  }
+
+  /* Status bar */
+  .status-bar {
+    width: 100%; background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 8px 16px; font-size: 0.7rem;
+    color: var(--dim); text-align: center;
+    min-height: 36px; display: flex; align-items: center; justify-content: center;
+  }
+  .status-bar.info { color: var(--accent); border-color: rgba(0,212,255,0.3); }
+  .status-bar.success { color: var(--safe); border-color: rgba(0,255,136,0.3); }
+  .status-bar.warn { color: var(--accent2); border-color: rgba(255,107,53,0.3); }
+  .status-bar.dead { color: var(--danger); border-color: rgba(255,51,85,0.4); }
+
+  /* Speed slider */
+  .speed-row { display: flex; align-items: center; gap: 8px; font-size: 0.68rem; color: var(--dim); }
+  input[type=range] {
+    flex:1; accent-color: var(--accent);
+    background: var(--border); height: 4px; outline: none; border: none;
+  }
+
+  /* Resolution steps log */
+  .res-log {
+    flex:1; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 10px; font-size: 0.64rem; color: var(--dim);
+    line-height: 1.8; max-height: 260px;
+  }
+  .res-log .step { color: #ffe066; }
+  .res-log .clause { color: #00d4ff; padding-left: 12px; }
+  .res-log .result-safe { color: var(--safe); }
+  .res-log .result-unsafe { color: var(--danger); }
+
+  /* Legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; }
+  .legend-item { display:flex; align-items:center; gap:5px; font-size:0.62rem; color: var(--dim); }
+  .legend-box { width:12px; height:12px; border:1px solid; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+
+  /* Step btn */
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { width: auto; flex: 1; }
+
+  @keyframes pulse-agent {
+    0%,100% { box-shadow: 0 0 18px rgba(255,224,102,0.3), inset 0 0 12px rgba(255,224,102,0.08); }
+    50% { box-shadow: 0 0 30px rgba(255,224,102,0.6), inset 0 0 20px rgba(255,224,102,0.15); }
+  }
+  .cell.agent-here { animation: pulse-agent 1.5s infinite; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⬡ WUMPUS LOGIC AGENT</div>
+  <div class="sub">Knowledge-Based Agent · Propositional Logic · Resolution Refutation</div>
+</header>
+
+<div class="main-layout">
+
+  <!-- LEFT PANEL -->
+  <div class="side-panel">
+    <div class="panel-title">Configuration</div>
+    <div class="config-group">
+      <div class="config-row">
+        <label>Grid Rows</label>
+        <input type="number" id="inp-rows" value="4" min="3" max="7"/>
+      </div>
+      <div class="config-row">
+        <label>Grid Cols</label>
+        <input type="number" id="inp-cols" value="4" min="3" max="7"/>
+      </div>
+      <div class="config-row">
+        <label>Pit Count</label>
+        <input type="number" id="inp-pits" value="2" min="1" max="5"/>
+      </div>
+    </div>
+    <button class="btn" id="btn-init">[ INITIALIZE WORLD ]</button>
+    <button class="btn danger" id="btn-reset" disabled>[ RESET ]</button>
+
+    <div class="panel-title" style="margin-top:8px">Agent Speed</div>
+    <div class="speed-row">
+      <span>Slow</span>
+      <input type="range" id="inp-speed" min="200" max="2000" value="900" step="100"/>
+      <span>Fast</span>
+    </div>
+
+    <div class="panel-title" style="margin-top:8px">Step Control</div>
+    <div class="btn-row">
+      <button class="btn" id="btn-step" disabled>STEP</button>
+      <button class="btn" id="btn-auto" disabled>AUTO</button>
+    </div>
+
+    <div class="panel-title" style="margin-top:8px">Legend</div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-box" style="background:rgba(0,255,136,0.12);border-color:rgba(0,255,136,0.5)"></div>Safe</div>
+      <div class="legend-item"><div class="legend-box" style="background:#1e2a3a;border-color:#1e2a3a"></div>Unknown</div>
+      <div class="legend-item"><div class="legend-box" style="background:rgba(255,51,85,0.18);border-color:rgba(255,51,85,0.6)"></div>Hazard</div>
+      <div class="legend-item"><div class="legend-box" style="background:rgba(255,224,102,0.12);border-color:#ffe066"></div>Agent</div>
+      <div class="legend-item"><div class="legend-box" style="background:#0d2030;border-color:#1a3050"></div>Visited</div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center-area">
+    <div id="grid-container"></div>
+    <div class="status-bar" id="status-bar">Configure grid and click INITIALIZE WORLD to begin.</div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="side-panel right">
+    <div class="panel-title">Metrics Dashboard</div>
+    <div class="metric-card">
+      <div class="metric-label">Inference Steps</div>
+      <div class="metric-value" id="m-steps">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Cells Visited</div>
+      <div class="metric-value orange" id="m-visited">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Safe Cells Proven</div>
+      <div class="metric-value green" id="m-safe">0</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">KB Clauses</div>
+      <div class="metric-value" id="m-kb">0</div>
+    </div>
+
+    <div class="panel-title" style="margin-top:4px">Active Percepts</div>
+    <div class="percept-row">
+      <div class="percept-dot" id="p-breeze"></div>
+      <span>Breeze (adjacent to Pit)</span>
+    </div>
+    <div class="percept-row">
+      <div class="percept-dot stench" id="p-stench" style="background:var(--dim);box-shadow:none"></div>
+      <span>Stench (adjacent to Wumpus)</span>
+    </div>
+    <div class="percept-row">
+      <div class="percept-dot" id="p-glitter" style="background:var(--dim)"></div>
+      <span>Glitter (Gold nearby)</span>
+    </div>
+
+    <div class="panel-title" style="margin-top:4px">KB / TELL Log</div>
+    <div class="kb-log" id="kb-log"></div>
+
+    <div class="panel-title" style="margin-top:4px">Resolution Steps</div>
+    <div class="res-log" id="res-log"></div>
+  </div>
+
+</div>
+
+<script>
+// =============================================
+//  WUMPUS WORLD - KNOWLEDGE-BASED AGENT
+//  Propositional Logic + Resolution Refutation
+// =============================================
+
+let ROWS, COLS, PITS;
+let world = {};         // ground truth: { pits:Set, wumpus:{r,c}, gold:{r,c} }
+let agentPos = {r:0, c:0};
+let agentAlive = true;
+let goldFound = false;
+
+// KB: set of clauses, each clause is array of literals (strings)
+// Literal: "P_r_c" (pit at r,c), "W_r_c" (wumpus), "B_r_c" (breeze), "S_r_c" (stench)
+// Negation: "~P_r_c"
+let KB = [];
+let visitedCells = new Set();
+let safeCells = new Set();
+let dangerCells = new Set();
+
+// Metrics
+let inferenceSteps = 0;
+let autoTimer = null;
+let isAuto = false;
+
+// ---- DOM helpers ----
+const $ = id => document.getElementById(id);
+const kbLog = $('kb-log');
+const resLog = $('res-log');
+
+function logKB(msg, type='') {
+  const d = document.createElement('div');
+  d.className = 'entry ' + type;
+  d.textContent = msg;
+  kbLog.appendChild(d);
+  kbLog.scrollTop = kbLog.scrollHeight;
+}
+
+function logRes(msg, type='') {
+  const d = document.createElement('div');
+  d.className = type;
+  d.textContent = msg;
+  resLog.appendChild(d);
+  resLog.scrollTop = resLog.scrollHeight;
+}
+
+function setStatus(msg, type='info') {
+  const el = $('status-bar');
+  el.textContent = msg;
+  el.className = 'status-bar ' + type;
+}
+
+function updateMetrics() {
+  $('m-steps').textContent = inferenceSteps;
+  $('m-visited').textContent = visitedCells.size;
+  $('m-safe').textContent = safeCells.size;
+  $('m-kb').textContent = KB.length;
+}
+
+// ---- WORLD INIT ----
+function initWorld() {
+  ROWS = parseInt($('inp-rows').value);
+  COLS = parseInt($('inp-cols').value);
+  PITS = parseInt($('inp-pits').value);
+
+  KB = []; visitedCells = new Set(); safeCells = new Set();
+  dangerCells = new Set(); inferenceSteps = 0;
+  agentPos = {r: ROWS-1, c: 0}; agentAlive = true; goldFound = false;
+  kbLog.innerHTML = ''; resLog.innerHTML = '';
+
+  // Place hazards randomly (not at start)
+  const allCells = [];
+  for(let r=0; r<ROWS; r++) for(let c=0; c<COLS; c++) {
+    if(!(r===ROWS-1 && c===0)) allCells.push({r,c});
+  }
+  shuffle(allCells);
+
+  world.pits = new Set();
+  for(let i=0; i<Math.min(PITS, allCells.length-2); i++) {
+    world.pits.add(key(allCells[i].r, allCells[i].c));
+  }
+  world.wumpus = allCells[PITS];
+  world.gold   = allCells[PITS+1];
+
+  buildGrid();
+  addInitialKBFacts();
+  updateMetrics();
+  $('btn-reset').disabled = false;
+  $('btn-step').disabled = false;
+  $('btn-auto').disabled = false;
+
+  // Visit start cell
+  visitCell(agentPos.r, agentPos.c);
+  setStatus(`Agent initialized at (${agentPos.r},${agentPos.c}). World: ${ROWS}×${COLS}, Pits: ${PITS}`, 'info');
+}
+
+function key(r,c) { return `${r}_${c}`; }
+
+function shuffle(arr) {
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+}
+
+// ---- GRID UI ----
+function buildGrid() {
+  const gc = $('grid-container');
+  gc.innerHTML = '';
+  const size = Math.min(72, Math.floor((window.innerHeight - 160) / ROWS) - 4);
+  gc.style.gridTemplateColumns = `repeat(${COLS}, ${size}px)`;
+
+  for(let r=0; r<ROWS; r++) {
+    for(let c=0; c<COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.id = `cell-${r}-${c}`;
+      cell.style.width = cell.style.height = size + 'px';
+      cell.innerHTML = `
+        <div class="cell-icon" id="icon-${r}-${c}">?</div>
+        <div class="percept-indicators" id="pi-${r}-${c}"></div>
+        <div class="coord">(${r},${c})</div>`;
+      gc.appendChild(cell);
+    }
+  }
+  renderGrid();
+}
+
+function renderGrid() {
+  for(let r=0; r<ROWS; r++) {
+    for(let c=0; c<COLS; c++) {
+      const cell = document.getElementById(`cell-${r}-${c}`);
+      const icon = document.getElementById(`icon-${r}-${c}`);
+      const pi   = document.getElementById(`pi-${r}-${c}`);
+      const k = key(r,c);
+      const isAgent = agentPos.r===r && agentPos.c===c;
+      const visited = visitedCells.has(k);
+      const safe = safeCells.has(k);
+      const danger = dangerCells.has(k);
+
+      cell.className = 'cell';
+      if(isAgent) cell.classList.add('agent-here');
+      else if(danger) cell.classList.add('danger-confirmed');
+      else if(safe && visited) cell.classList.add('safe');
+      else if(safe) cell.classList.add('safe');
+      else if(visited) cell.classList.add('visited');
+
+      // Icon logic
+      let ic = '';
+      pi.innerHTML = '';
+
+      if(isAgent && goldFound) { ic = '🏆'; }
+      else if(isAgent && !agentAlive) { ic = '💀'; }
+      else if(isAgent) { ic = '🤖'; }
+      else if(!agentAlive && visited) { ic=''; }
+      else if(danger && world.pits.has(k)) { ic = '🕳️'; }
+      else if(danger && key(world.wumpus.r,world.wumpus.c)===k) { ic = '👾'; }
+      else if(safe && !visited) { ic = '✓'; }
+      else if(!visited) { ic = '<span style="color:#2a3a4a;font-size:0.9rem">■</span>'; }
+      else { ic = ''; }
+
+      icon.innerHTML = ic;
+
+      // Show percept indicators only on visited cells
+      if(visited && k!==key(agentPos.r,agentPos.c)) {
+        const percepts = getPercepts(r,c);
+        if(percepts.breeze) pi.innerHTML += '<span title="Breeze">🌬</span>';
+        if(percepts.stench) pi.innerHTML += '<span title="Stench">💨</span>';
+      }
+    }
+  }
+}
+
+// ---- PERCEPT GENERATION ----
+function getPercepts(r,c) {
+  const adj = getAdjacent(r,c);
+  let breeze=false, stench=false, glitter=false;
+  for(const {r:ar,c:ac} of adj) {
+    if(world.pits.has(key(ar,ac))) breeze=true;
+    if(world.wumpus && ar===world.wumpus.r && ac===world.wumpus.c) stench=true;
+  }
+  if(world.gold && r===world.gold.r && c===world.gold.c) glitter=true;
+  return {breeze,stench,glitter};
+}
+
+function getAdjacent(r,c) {
+  return [{r:r-1,c},{r:r+1,c},{r,c:c-1},{r,c:c+1}].filter(p=>p.r>=0&&p.r<ROWS&&p.c>=0&&p.c<COLS);
+}
+
+// ---- KB / TELL ----
+function addInitialKBFacts() {
+  // Start cell is safe and has no pit/wumpus
+  const {r,c} = {r:ROWS-1, c:0};
+  tellFact(`~P_${r}_${c}`, `Start cell has no Pit`);
+  tellFact(`~W_${r}_${c}`, `Start cell has no Wumpus`);
+  safeCells.add(key(r,c));
+}
+
+function tellFact(literal, reason) {
+  KB.push([literal]);
+  logKB(`TELL: ${literal}  // ${reason}`, 'tell');
+  updateMetrics();
+}
+
+function tellBreeze(r,c) {
+  // B_r_c <=> OR of P for each adjacent
+  // We add: ~B_r_c v P_adj1 v P_adj2 ... (B=>P)
+  // and for each adj: ~P_adj v B_r_c (P=>B) -- simplified
+  tellFact(`B_${r}_${c}`, `Breeze perceived at (${r},${c})`);
+  const adj = getAdjacent(r,c);
+  // B_r_c => disjunction of P_adj
+  const clause = [`~B_${r}_${c}`, ...adj.map(a=>`P_${a.r}_${a.c}`)];
+  KB.push(clause);
+  logKB(`TELL: ${clause.join(' ∨ ')}`, 'tell');
+  updateMetrics();
+}
+
+function tellNoBreeze(r,c) {
+  tellFact(`~B_${r}_${c}`, `No Breeze at (${r},${c})`);
+  // ~B_r_c => ~P for each adjacent
+  const adj = getAdjacent(r,c);
+  for(const a of adj) {
+    tellFact(`~P_${a.r}_${a.c}`, `No pit at (${a.r},${a.c}) from no-breeze at (${r},${c})`);
+    safeCells.add(key(a.r,a.c));
+    logKB(`  ↳ INFERRED safe: (${a.r},${a.c})`, 'safe');
+  }
+}
+
+function tellStench(r,c) {
+  tellFact(`S_${r}_${c}`, `Stench perceived at (${r},${c})`);
+  const adj = getAdjacent(r,c);
+  const clause = [`~S_${r}_${c}`, ...adj.map(a=>`W_${a.r}_${a.c}`)];
+  KB.push(clause);
+  logKB(`TELL: ${clause.join(' ∨ ')}`, 'tell');
+  updateMetrics();
+}
+
+function tellNoStench(r,c) {
+  tellFact(`~S_${r}_${c}`, `No Stench at (${r},${c})`);
+  const adj = getAdjacent(r,c);
+  for(const a of adj) {
+    tellFact(`~W_${a.r}_${a.c}`, `No wumpus at (${a.r},${a.c})`);
+  }
+}
+
+// ---- ASK: RESOLUTION REFUTATION ----
+// To prove α: add ¬α to KB, resolve to derive empty clause (contradiction)
+// Returns true if α is entailed
+function askSafe(r, c) {
+  // Prove: ~P_r_c AND ~W_r_c (cell is safe)
+  inferenceSteps++;
+  const provePit = resolutionRefutation(`~P_${r}_${c}`);
+  const proveWumpus = resolutionRefutation(`~W_${r}_${c}`);
+  return provePit && proveWumpus;
+}
+
+function resolutionRefutation(alpha) {
+  // Negate alpha and add to KB copy, then resolve
+  inferenceSteps++;
+  updateMetrics();
+
+  logRes(`── ASK: Prove "${alpha}" ──`, 'step');
+
+  const negAlpha = negateLiteral(alpha);
+  // Build working clause set = KB + {negAlpha}
+  let clauses = KB.map(c=>[...c]);
+  clauses.push([negAlpha]);
+
+  // Convert all to CNF (already in CNF as unit clauses or Horn clauses)
+  clauses = toCNF(clauses);
+
+  logRes(`  Clauses (${clauses.length}): KB ∪ {${negAlpha}}`, 'clause');
+
+  // Resolution loop
+  const seen = new Set(clauses.map(clauseKey));
+  let changed = true;
+  let maxIter = 200;
+
+  while(changed && maxIter-- > 0) {
+    changed = false;
+    const n = clauses.length;
+    for(let i=0; i<n && maxIter>0; i++) {
+      for(let j=i+1; j<n && maxIter>0; j++) {
+        const resolvents = resolve(clauses[i], clauses[j]);
+        for(const res of resolvents) {
+          if(res.length === 0) {
+            // Empty clause = contradiction found => alpha is entailed
+            logRes(`  ✓ Empty clause derived → "${alpha}" PROVEN`, 'result-safe');
+            inferenceSteps++;
+            updateMetrics();
+            return true;
+          }
+          const k = clauseKey(res);
+          if(!seen.has(k)) {
+            seen.add(k);
+            clauses.push(res);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  logRes(`  ✗ No contradiction → "${alpha}" NOT proven`, 'result-unsafe');
+  return false;
+}
+
+function negateLiteral(lit) {
+  return lit.startsWith('~') ? lit.slice(1) : '~'+lit;
+}
+
+function clauseKey(clause) {
+  return [...clause].sort().join('|');
+}
+
+// Resolve two clauses on complementary literals
+function resolve(c1, c2) {
+  const results = [];
+  for(const lit of c1) {
+    const neg = negateLiteral(lit);
+    if(c2.includes(neg)) {
+      // Resolve on lit/neg
+      const resolvent = [
+        ...c1.filter(l=>l!==lit),
+        ...c2.filter(l=>l!==neg)
+      ];
+      // Remove duplicates and tautologies
+      const unique = [...new Set(resolvent)];
+      // Check tautology: contains both lit and ~lit for some lit
+      let taut = false;
+      for(const l of unique) {
+        if(unique.includes(negateLiteral(l))) { taut=true; break; }
+      }
+      if(!taut) results.push(unique);
+    }
+  }
+  return results;
+}
+
+// toCNF: our KB is already in CNF (list of clauses)
+// Each clause is a disjunction of literals
+function toCNF(clauses) {
+  // Already in CNF format, just return
+  return clauses;
+}
+
+// ---- VISIT CELL ----
+function visitCell(r, c) {
+  const k = key(r,c);
+  visitedCells.add(k);
+  safeCells.add(k);
+
+  // Check for death
+  if(world.pits.has(k)) {
+    agentAlive = false;
+    dangerCells.add(k);
+    renderGrid();
+    setStatus(`💀 Agent fell into a PIT at (${r},${c})! Game Over.`, 'dead');
+    $('btn-step').disabled = true;
+    $('btn-auto').disabled = true;
+    stopAuto();
+    return false;
+  }
+  if(world.wumpus && world.wumpus.r===r && world.wumpus.c===c) {
+    agentAlive = false;
+    dangerCells.add(k);
+    renderGrid();
+    setStatus(`💀 Agent eaten by WUMPUS at (${r},${c})! Game Over.`, 'dead');
+    $('btn-step').disabled = true;
+    $('btn-auto').disabled = true;
+    stopAuto();
+    return false;
+  }
+
+  // Gold?
+  if(world.gold && world.gold.r===r && world.gold.c===c) {
+    goldFound = true;
+    renderGrid();
+    setStatus(`🏆 GOLD FOUND at (${r},${c})! Agent wins!`, 'success');
+    $('btn-step').disabled = true;
+    $('btn-auto').disabled = true;
+    stopAuto();
+    return false;
+  }
+
+  // Get percepts
+  const {breeze, stench, glitter} = getPercepts(r,c);
+
+  // Update percept display
+  $('p-breeze').className = 'percept-dot' + (breeze?' active':'');
+  $('p-stench').style.cssText = stench
+    ? 'background:#aa55ff;box-shadow:0 0 8px #aa55ff;width:8px;height:8px;border-radius:50%'
+    : 'background:var(--dim);box-shadow:none;width:8px;height:8px;border-radius:50%';
+  $('p-glitter').style.cssText = glitter
+    ? 'background:#ffe066;box-shadow:0 0 8px #ffe066;width:8px;height:8px;border-radius:50%'
+    : 'background:var(--dim);box-shadow:none;width:8px;height:8px;border-radius:50%';
+
+  // TELL KB
+  if(breeze) tellBreeze(r,c);
+  else tellNoBreeze(r,c);
+  if(stench) tellStench(r,c);
+  else tellNoStench(r,c);
+
+  tellFact(`~P_${r}_${c}`, `Agent safely visited (${r},${c})`);
+  tellFact(`~W_${r}_${c}`, `Agent safely visited (${r},${c})`);
+
+  updateMetrics();
+  renderGrid();
+  setStatus(`Agent at (${r},${c}) | Breeze:${breeze?'YES':'NO'} Stench:${stench?'YES':'NO'} Glitter:${glitter?'YES':'NO'}`, 'info');
+  return true;
+}
+
+// ---- AGENT STEP ----
+function agentStep() {
+  if(!agentAlive || goldFound) return;
+
+  const adj = getAdjacent(agentPos.r, agentPos.c);
+  const unvisited = adj.filter(a=>!visitedCells.has(key(a.r,a.c)));
+
+  // ASK KB which unvisited neighbors are safe
+  let safeNext = [];
+  for(const a of unvisited) {
+    logRes(``, '');
+    const isSafe = askSafe(a.r, a.c);
+    if(isSafe) {
+      safeNext.push(a);
+      safeCells.add(key(a.r,a.c));
+      logKB(`ASK: (${a.r},${a.c}) safe? → YES`, 'safe');
+    } else {
+      logKB(`ASK: (${a.r},${a.c}) safe? → UNKNOWN`, 'ask');
+    }
+    updateMetrics();
+  }
+
+  let moved = false;
+  if(safeNext.length > 0) {
+    // Move to first proven safe cell
+    const next = safeNext[0];
+    agentPos = {r:next.r, c:next.c};
+    moved = visitCell(next.r, next.c);
+  } else if(unvisited.length > 0) {
+    // No proven safe cell, try unvisited (brave mode)
+    const next = unvisited[Math.floor(Math.random()*unvisited.length)];
+    agentPos = {r:next.r, c:next.c};
+    setStatus(`No safe cell proven. Moving bravely to (${next.r},${next.c})...`, 'warn');
+    moved = visitCell(next.r, next.c);
+  } else {
+    // Backtrack to any visited neighbor
+    const visited_adj = adj.filter(a=>visitedCells.has(key(a.r,a.c)));
+    if(visited_adj.length > 0) {
+      const next = visited_adj[0];
+      agentPos = {r:next.r, c:next.c};
+      setStatus(`All neighbors visited/unsafe. Backtracking to (${next.r},${next.c}).`, 'warn');
+      renderGrid();
+    } else {
+      setStatus('Agent is stuck. No moves available.', 'warn');
+      stopAuto();
+    }
+  }
+  updateMetrics();
+}
+
+// ---- AUTO ----
+function startAuto() {
+  isAuto = true;
+  $('btn-auto').textContent = 'STOP';
+  scheduleNext();
+}
+function stopAuto() {
+  isAuto = false;
+  $('btn-auto').textContent = 'AUTO';
+  clearTimeout(autoTimer);
+}
+function scheduleNext() {
+  if(!isAuto) return;
+  const delay = 2200 - parseInt($('inp-speed').value);
+  autoTimer = setTimeout(()=>{
+    agentStep();
+    if(isAuto && agentAlive && !goldFound) scheduleNext();
+    else stopAuto();
+  }, delay);
+}
+
+// ---- EVENT LISTENERS ----
+$('btn-init').addEventListener('click', initWorld);
+$('btn-reset').addEventListener('click', ()=>{
+  stopAuto();
+  $('btn-reset').disabled=true;
+  $('btn-step').disabled=true;
+  $('btn-auto').disabled=true;
+  $('grid-container').innerHTML='';
+  kbLog.innerHTML=''; resLog.innerHTML='';
+  $('m-steps').textContent=$('m-visited').textContent=$('m-safe').textContent=$('m-kb').textContent='0';
+  ['p-breeze','p-stench','p-glitter'].forEach(id=>{
+    const el=$(id);
+    el.className='percept-dot';
+    el.style.cssText='';
+  });
+  setStatus('Configure grid and click INITIALIZE WORLD to begin.','');
+  $('status-bar').className='status-bar';
+});
+$('btn-step').addEventListener('click', ()=>{ if(!isAuto) agentStep(); });
+$('btn-auto').addEventListener('click', ()=>{
+  if(isAuto) stopAuto(); else startAuto();
+});
+</script>
+</body>
+</html>
